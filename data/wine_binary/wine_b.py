@@ -2,6 +2,7 @@ from data.wine_binary import prep
 import numpy as np
 from scipy.stats import pearsonr
 
+
 def load_data():
     dataset = prep.prep_data(True)
     print(dataset.head())

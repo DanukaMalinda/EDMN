@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Mon Nov  7 13:35:22 2022
 
-@author: Zahra
+"""
+data preparation.
+Reference:
+    - https://github.com/z-donyavi/MC-SQ/blob/main/helpers.py
+    Z. Donyavi, A. B. S. Serapi˜ao, and G. Batista, “Mc-sq and mc-mq: Ensembles for multiclass quantification,
+    ” IEEE Transactions on Knowledge and Data Engineering, vol. 36, no. 8, pp. 4007–4019, 2024.
+
+
 """
 
 import pandas as pd

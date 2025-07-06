@@ -1,6 +1,7 @@
 from data.yeast import prep
 import numpy as np
 
+
 def load_data():
     dataset = prep.prep_data(True)
     print(dataset.head())

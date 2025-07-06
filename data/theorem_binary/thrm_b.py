@@ -2,6 +2,7 @@ from data.theorem_binary import prep
 import numpy as np
 from scipy.stats import pearsonr
 
+
 def load_data():
     dataset = prep.prep_data()
     print(dataset.head())

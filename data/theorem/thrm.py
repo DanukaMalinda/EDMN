@@ -1,6 +1,8 @@
 from data.theorem import prep
 import numpy as np
 
+
+
 def load_data():
     dataset = prep.prep_data()
     print(dataset.head())

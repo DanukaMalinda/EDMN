@@ -1,6 +1,8 @@
 from data.video_game_sales import prep
 import numpy as np
 
+
+
 def load_data():
     dataset = prep.prep_data(True)
     print(dataset.head())

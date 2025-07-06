@@ -2,6 +2,7 @@ from data.turk_student_eval_binary import prep
 import numpy as np
 from scipy.stats import pearsonr
 
+
 def load_data():
     dataset = prep.prep_data()
     print(dataset.head())
