@@ -377,7 +377,7 @@ for dt_distr in dt_ratios:
                             specific_model_for_dataset = multiclass_models.getModel(args.dataset, input_dim, num_classes)
 
                             if load_data:
-                                specific_model_for_dataset.load_state_dict(torch.load(f'../models/{args.dataset}_multiclass_model_weights.pth', map_location=device)) 
+                                specific_model_for_dataset.load_state_dict(torch.load(f'../models/{args.dataset}_binary_model_weights.pth', map_location=device)) 
 
                             model = FullModel(model=specific_model_for_dataset).to(device)
 
