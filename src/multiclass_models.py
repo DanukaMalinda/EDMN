@@ -459,6 +459,30 @@ class hars_model(nn.Module):
         logits = self.fc7(x)
         probs = F.softmax(logits / temperature, dim=1)
         return logits, probs
+    
+# class micro_model(nn.Module):
+#     def __init__(self, input_dim, num_classes):
+#         super(micro_model, self).__init__()
+#         self.fc1 = nn.Linear(input_dim, 128)
+#         self.bn1 = nn.BatchNorm1d(128)
+#         self.fc2 = nn.Linear(128, 64)
+#         self.bn2 = nn.BatchNorm1d(64)
+#         self.fc3 = nn.Linear(64, 32)
+#         self.bn3 = nn.BatchNorm1d(32)
+#         self.fc4 = nn.Linear(32, 16)
+#         self.bn4 = nn.BatchNorm1d(16)
+#         self.fc5 = nn.Linear(16, num_classes)
+#         self.dropout = nn.Dropout(0.001)
+
+#     def forward(self, x, temperature=1.0):
+#         x = F.relu(self.bn1(self.fc1(x)))
+#         x = self.dropout(F.relu(self.bn2(self.fc2(x))))
+#         x = self.dropout(F.relu(self.bn3(self.fc3(x))))
+#         x = F.relu(self.bn4(self.fc4(x)))
+
+#         logits = self.fc5(x)
+#         probs = F.softmax(logits / temperature, dim=1)
+#         return logits, probs
 
 class micro_model(nn.Module):
     def __init__(self, input_dim, num_classes):
@@ -589,6 +613,29 @@ class pend_model(nn.Module):
         probs = F.softmax(logits / temperature, dim=1)
         return logits, probs
 
+# class rice_model(nn.Module):
+#     def __init__(self, input_dim, num_classes):
+#         super(rice_model, self).__init__()
+#         self.fc1 = nn.Linear(input_dim, 128)
+#         self.bn1 = nn.BatchNorm1d(128)
+#         self.fc2 = nn.Linear(128, 64)
+#         self.bn2 = nn.BatchNorm1d(64)
+#         self.fc3 = nn.Linear(64, 32)
+#         self.bn3 = nn.BatchNorm1d(32)
+#         self.fc4 = nn.Linear(32, 16)
+#         self.bn4 = nn.BatchNorm1d(16)
+#         self.fc5 = nn.Linear(16, num_classes)
+#         self.dropout = nn.Dropout(0.001)
+
+#     def forward(self, x, temperature=1.0):
+#         x = F.relu(self.bn1(self.fc1(x)))
+#         x = self.dropout(F.relu(self.bn2(self.fc2(x))))
+#         x = self.dropout(F.relu(self.bn3(self.fc3(x))))
+#         x = F.relu(self.bn4(self.fc4(x)))
+
+#         logits = self.fc5(x)
+#         probs = F.softmax(logits / temperature, dim=1)
+#         return logits, probs
     
 class rice_model(nn.Module):
     def __init__(self, input_dim, num_classes):
@@ -608,6 +655,58 @@ class rice_model(nn.Module):
         logits = self.fc3(x)
         probs = F.softmax(logits / temperature, dim=1)
         return logits, probs
+    
+# class rice_model(nn.Module):
+#     def __init__(self, input_dim, num_classes):
+#         super(rice_model, self).__init__()
+#         self.fc1 = nn.Linear(input_dim, 128)
+#         self.bn1 = nn.BatchNorm1d(128)
+#         self.fc2 = nn.Linear(128, 64)
+#         self.bn2 = nn.BatchNorm1d(64)
+
+#         # Add a Conv2D layer: input [B, 1, 8, 8], output [B, 4, 8, 8]
+#         self.conv = nn.Conv2d(in_channels=1, out_channels=4, kernel_size=3, padding=1)
+#         self.bn_conv = nn.BatchNorm2d(4)
+
+#         self.conv2 = nn.Conv2d(in_channels=4, out_channels=12, kernel_size=3, padding=1)
+#         self.bn_conv2 = nn.BatchNorm2d(12)
+
+#         self.conv3 = nn.Conv2d(in_channels=12, out_channels=8, kernel_size=3, padding=1)
+#         self.bn_conv3 = nn.BatchNorm2d(8)
+
+#         self.conv4 = nn.Conv2d(in_channels=8, out_channels=4, kernel_size=3, padding=1)
+#         self.bn_conv4 = nn.BatchNorm2d(4)
+
+#         # Flattened output after conv layer is 4 * 8 * 8 = 256
+#         self.fc3 = nn.Linear(256, 32)
+#         self.bn3 = nn.BatchNorm1d(32)
+#         self.fc4 = nn.Linear(32, 16)
+#         self.bn4 = nn.BatchNorm1d(16)
+#         self.fc5 = nn.Linear(16, num_classes)
+#         self.dropout = nn.Dropout(0.001)
+
+#     def forward(self, x, temperature=1.0):
+#         x = F.relu(self.bn1(self.fc1(x)))
+#         x = self.dropout(F.relu(self.bn2(self.fc2(x))))
+
+#         # Reshape to [B, 1, 8, 8] for Conv2D
+#         x = x.view(-1, 1, 8, 8)
+
+#         x = F.relu(self.bn_conv(self.conv(x)))
+#         x = F.relu(self.bn_conv2(self.conv2(x)))
+#         x = F.relu(self.bn_conv3(self.conv3(x)))
+#         x = F.relu(self.bn_conv4(self.conv4(x)))
+
+
+#         # Flatten for next FC layer
+#         x = x.view(x.size(0), -1)
+
+#         x = self.dropout(F.relu(self.bn3(self.fc3(x))))
+#         x = F.relu(self.bn4(self.fc4(x)))
+
+#         logits = self.fc5(x)
+#         probs = F.softmax(logits / temperature, dim=1)
+#         return logits, probs
     
 class thrm_model(nn.Module):
     def __init__(self, input_dim, num_classes):

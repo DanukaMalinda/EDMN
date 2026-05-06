@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Results (generated at runtime - do not commit)
+results/
+results_ablation/
+results_ablation_binary/
+
+# Pre-trained model weights
+# Download or generate with tune_edmn_binary.py / tune_edmn_multiclass.py
+models/*.pth
+
+# QuaPy build artifacts
+QuaPy/*.egg-info/
+QuaPy/dist/
+QuaPy/build/

@@ -5,6 +5,7 @@ import numpy as np
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from data.dry_beans import dry_beans
 from data.yeast import yeast
 from data.wine import wine
 from data.video_game_sales import vgame
@@ -52,6 +53,7 @@ from data.wine_binary import wine_b
 from data.video_game_sales_binary import vgame_b
 from data.turk_student_eval_binary import turk_b
 from data.theorem_binary import thrm_b
+from data.telco_churn import telco_b
 from data.superconductor_binary import cond_b
 from data.student_performance import study_b
 from data.spambase import spam_b
@@ -63,11 +65,14 @@ from data.news_popularity_binary import news_b
 from data.musk import musk
 from data.music import music
 from data.occupancy import occup
-
+from data.nursery_binary import nurse_b
 
 def load_data(dataset):
     if dataset == 'yeast':
         X_n, y_n = yeast.load_data()
+
+    elif dataset == 'beans':
+        X_n, y_n = dry_beans.load_data()
 
     elif dataset == 'boone':
         X_n, y_n = boone.load_data()
@@ -222,6 +227,9 @@ def load_data(dataset):
     elif dataset == 'thrm_b':
         X_n, y_n = thrm_b.load_data()
 
+    elif dataset == 'telco_b':
+        X_n, y_n = telco_b.load_data()
+
     elif dataset == 'cond_b':
         X_n, y_n = cond_b.load_data()
 
@@ -242,6 +250,9 @@ def load_data(dataset):
 
     elif dataset == 'musk':
         X_n, y_n = musk.load_data()
+
+    elif dataset == 'nurse_b':
+        X_n, y_n = nurse_b.load_data()
 
     else:
         raise ValueError("Unknown dataset: " + dataset)

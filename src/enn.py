@@ -9,7 +9,7 @@ def get_confusion_matrix(y_train, y_train_pred, num_classes):
     
     return cm
 
-def train_edm(train_loader, val_loader, model, device, num_classes, bins, dm):
+def train_edm(train_loader, test_loader, model, device, num_classes, bins, dm):
     all_labels = []
     all_preds = []
     all_probs = []
@@ -40,10 +40,13 @@ def train_edm(train_loader, val_loader, model, device, num_classes, bins, dm):
 
     model.eval()
     with torch.no_grad():
-        for inputs, labels in val_loader:
+        for inputs, labels in test_loader:
             inputs, labels = inputs.to(device), labels.to(device)
 
             logits, probs = model(inputs)
+            # ce_loss = criterion(logits, labels)    #get the training loss
+            # # Combine losses using learned weights
+            # loss = ce_loss
 
             # Store labels and predictions
             all_labels_test.append(labels.detach().cpu())
