@@ -117,7 +117,7 @@ Search grid:
 
 | Hyperparameter | Values |
 |---|---|
-| `temperature` | 1.5, 2.0, 2.5, 3.0 |
+| `temperature` | 1.25, 1.5, 1.75, 2.0 |
 | `bins` | 30, 60, 90 |
 | `epsilon` (label smoothing) | 0.0, 0.01, 0.025, 0.05 |
 
