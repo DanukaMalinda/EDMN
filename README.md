@@ -42,9 +42,9 @@ Key options:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--distance_metric` | `HD` | Distance metric (HD, SE, MH, TS, …) |
-| `--temperature` | `2.0` | Softmax temperature for variants 3 & 5 |
-| `--bins` | `30` | Histogram bin count |
+| `--distance_metric` | `JD` | Distance metric (HD, SE, MH, TS, …) |
+| `--temperature` | `1.5` | Softmax temperature for variants 3 & 5 |
+| `--bins` | `90` | Histogram bin count |
 | `--epochs` | `50` | Training epochs per variant |
 
 Examples:
