@@ -7,7 +7,7 @@ inter-class conditional distributions to collapse and rendering class distributi
 overcome this, EDMN introduces a two-step framework that trains a quantification-aware neural network with
 a novel composite loss that enforces sufficient output entropy while preserving class identity, and then applies
 enhanced distribution matching over inter-class conditional probability distributions. Experimental results
-on 58 benchmark datasets show that the proposed approach outperforms existing quantification methods, 
+on 58 benchmark datasets show that the proposed approach outperforms existing quantification methods,
 achieving the lowest MAE on 77.6% of the datasets, including 19 of 22 multiclass and 26 of 36 binary datasets
 
 ---
@@ -28,7 +28,7 @@ cd src/
 
 ## Running EDMN
 
-Both scripts run five ablation variants in sequence for every experimental
+Both scripts run six ablation variants in sequence for every experimental
 configuration (train/test prevalence combination). The final summary line
 `Full EDMN` is the main EDMN result.
 
@@ -43,8 +43,9 @@ Key options:
 | Flag | Default | Description |
 |---|---|---|
 | `--distance_metric` | `JD` | Distance metric (HD, SE, MH, TS, …) |
-| `--temperature` | `1.5` | Softmax temperature for variants 3 & 5 |
-| `--bins` | `90` | Histogram bin count |
+| `--temperature` | `2.0` | Softmax temperature for variants 3, 5 & 6 |
+| `--smoothing` | `0.025` | Label smoothing for variants 2, 5 & 6 |
+| `--bins` | `30` | Histogram bin count |
 | `--epochs` | `50` | Training epochs per variant |
 
 Examples:
@@ -75,14 +76,15 @@ Output is saved to `../results_ablation/<dataset>_<dm>.csv`.
 
 ### Reading the results
 
-Both scripts print a summary table at the end. The five variants are:
+Both scripts print a summary table at the end. The six variants are:
 
 | Variant | What it tests |
 |---|---|
 | Baseline NN + EDM | Plain CE loss, no temperature, no EDM loss |
-| NN + Label Smoothing + EDM | Adds label smoothing (LS=0.025) |
+| NN + Label Smoothing + EDM | Adds label smoothing |
 | NN + Temperature Scaling + EDM | Adds softmax temperature during training |
-| NN + LDM Loss + EDM | Adds EDM loss in gradient (no LS) |
+| NN + Label Smoothing + Temperature Scaling + EDM | The ε+τ control — both tricks, no EDM loss |
+| NN + LDM Loss + EDM | Adds EDM loss in gradient (no label smoothing) |
 | **Full EDMN** | **CE + LS + temperature + EDM loss — main result** |
 
 ---
@@ -90,7 +92,7 @@ Both scripts print a summary table at the end. The five variants are:
 ## Running the Ablation Study
 
 The ablation study is the same command as running EDMN — the scripts run all
-five variants automatically. Use the summary table to compare variants.
+six variants automatically. Use the summary table to compare variants.
 
 ### Binary ablation
 
@@ -108,6 +110,41 @@ python run_ablation.py --dataset wine --temperature 2.0 --bins 30
 
 ---
 
+## Discrete Search vs. Gradient-Descent Search (diffjd)
+
+`run_ablation_diffjd.py` (multiclass) and `run_ablation_binary_diffjd.py` (binary)
+run the same six ablation variants, but for each one they run the EDM estimation
+step **twice** on the identical trained model — once with the existing discrete
+neighborhood search, once with Adam gradient descent on a differentiable Jensen
+Divergence — and report MAE, NKLD, and wall-clock time for both side by side, so
+the only variable being compared is the search algorithm itself.
+
+They don't touch `edm.py` / `edm_binary.py` / `run_ablation.py` /
+`run_ablation_binary.py` — the discrete-search scripts keep working exactly as
+before.
+
+```bash
+python run_ablation_diffjd.py --dataset wine
+python run_ablation_binary_diffjd.py --dataset cappl
+```
+
+Extra options (on top of the standard flags above):
+
+| Flag | Default | Description |
+|---|---|---|
+| `--search_steps` | `200` | Adam steps for the gradient-descent search |
+| `--search_lr` | `0.05` | Adam learning rate for the gradient-descent search |
+| `--max_configs` | none | Cap the number of configs run — useful for a quick smoke test |
+
+Only `JD` is implemented as a differentiable metric right now, so
+`--distance_metric` must stay `JD` for these two scripts.
+
+Output is saved to `../results_ablation_diffjd/` and
+`../results_ablation_binary_diffjd/` respectively — separate directories from
+the plain ablation scripts, so nothing gets overwritten.
+
+---
+
 ## Hyperparameter Tuning
 
 Grid search over temperature, histogram bins, and label smoothing epsilon.
@@ -117,11 +154,11 @@ Search grid:
 
 | Hyperparameter | Values |
 |---|---|
-| `temperature` | 1.25, 1.5, 1.75, 2.0 |
-| `bins` | 30, 60, 90 |
+| `temperature` | 1.5, 2.0, 2.5, 3.0 |
+| `bins` | 30, 60, 90 <!-- VERIFY for tune_edmn_binary.py specifically: your local copy has an unresolved conflict between a 3-value (30,60,90) and 4-value (15,30,60,90) bins grid. Confirm which you kept before publishing — it changes the combo count for binary from 48 to 64. --> |
 | `epsilon` (label smoothing) | 0.0, 0.01, 0.025, 0.05 |
 
-48 combinations per dataset.
+48 combinations per dataset (multiclass; see note above for binary).
 
 ### Binary tuning
 
