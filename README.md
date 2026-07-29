@@ -7,8 +7,8 @@ inter-class conditional distributions to collapse and rendering class distributi
 overcome this, EDMN introduces a two-step framework that trains a quantification-aware neural network with
 a novel composite loss that enforces sufficient output entropy while preserving class identity, and then applies
 enhanced distribution matching over inter-class conditional probability distributions. Experimental results
-on 58 benchmark datasets show that the proposed approach outperforms existing quantification methods
-achieving the lowest MAE on 79% of the datasets, including 19 of 22 multiclass and 27 of 36 binary datasets
+on 58 benchmark datasets show that the proposed approach outperforms existing quantification methods, 
+achieving the lowest MAE on 77.6% of the datasets, including 19 of 22 multiclass and 26 of 36 binary datasets
 
 ---
 
