@@ -29,8 +29,7 @@ cd src/
 ## Running EDMN
 
 Both scripts run six ablation variants in sequence for every experimental
-configuration (train/test prevalence combination). The final summary line
-`Full EDMN` is the main EDMN result.
+configuration (train/test prevalence combination).
 
 ### Binary datasets
 
@@ -119,9 +118,8 @@ neighborhood search, once with Adam gradient descent on a differentiable Jensen
 Divergence — and report MAE, NKLD, and wall-clock time for both side by side, so
 the only variable being compared is the search algorithm itself.
 
-They don't touch `edm.py` / `edm_binary.py` / `run_ablation.py` /
-`run_ablation_binary.py` — the discrete-search scripts keep working exactly as
-before.
+They don't use `edm.py` / `edm_binary.py` / `run_ablation.py` /
+`run_ablation_binary.py` — the discrete-search scripts
 
 ```bash
 python run_ablation_diffjd.py --dataset wine
@@ -141,7 +139,7 @@ Only `JD` is implemented as a differentiable metric right now, so
 
 Output is saved to `../results_ablation_diffjd/` and
 `../results_ablation_binary_diffjd/` respectively — separate directories from
-the plain ablation scripts, so nothing gets overwritten.
+the plain ablation scripts.
 
 ---
 
@@ -155,10 +153,8 @@ Search grid:
 | Hyperparameter | Values |
 |---|---|
 | `temperature` | 1.5, 2.0, 2.5, 3.0 |
-| `bins` | 30, 60, 90 <!-- VERIFY for tune_edmn_binary.py specifically: your local copy has an unresolved conflict between a 3-value (30,60,90) and 4-value (15,30,60,90) bins grid. Confirm which you kept before publishing — it changes the combo count for binary from 48 to 64. --> |
+| `bins` | 10, 20, 30, 40, 50, 60, 70, 80, 90, 100 
 | `epsilon` (label smoothing) | 0.0, 0.01, 0.025, 0.05 |
-
-48 combinations per dataset (multiclass; see note above for binary).
 
 ### Binary tuning
 
