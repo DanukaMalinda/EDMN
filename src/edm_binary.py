@@ -278,7 +278,7 @@ def get_steps(num_classes, current_combination=[]):
         if sum(current_combination) == 0:
             yield tuple(current_combination)
         return
-    
+
     for element in arr:
         new_combination = current_combination + [element]
         yield from get_steps(num_classes-1, new_combination)
@@ -286,7 +286,7 @@ def get_steps(num_classes, current_combination=[]):
 def get_additional_neighbors(num_classes, step=2):
     directions = []
     index_pairs = list(itertools.combinations(range(num_classes), 2))
-    
+
     for i, j in index_pairs:
         for sign in [-1, 1]:
             vec = [0] * num_classes
@@ -376,8 +376,8 @@ def get_estimation(train_hist_dictionary, test_hist_dictionary, num_classes, nei
 
             while True:
                 neighborhood = neighborhood_steps + best_estimation
-                
-                
+
+
                 for current_neighbor in neighborhood:
                     # print('current neighbor: ',current_neighbor)
                     if not np.all(current_neighbor>= 0): continue
@@ -388,14 +388,14 @@ def get_estimation(train_hist_dictionary, test_hist_dictionary, num_classes, nei
                     if (distance < min_distance):
                         min_distance = distance
                         best_estimation = current_neighbor
-            
+
                 if min_distance < init_distance:
                     init_distance = min_distance
                 else: break
-            
+
             final_estimation.append(best_estimation)
             total_distance += min_distance
-        
+
         if total_distance < best_distance:
             position = count
             estimation = final_estimation

@@ -78,8 +78,8 @@ parser.add_argument('--warmup',     type=int, default=15,
                     help='Warmup epochs before early stopping activates')
 parser.add_argument('--lr',         type=float, default=0.001)
 parser.add_argument('--batch_size', type=int, default=64)
-parser.add_argument('--dm',         type=str, default='HD',
-                    help='Distance metric: HD, SE, MH, TS, etc.')
+parser.add_argument('--dm',         type=str, default='JD',
+                    help='Distance metric: HD, SE, MH, TS, JD, etc.')
 parser.add_argument('--seed',       type=int, default=42)
 # Narrow the grid at the CLI if you want a faster run:
 parser.add_argument('--temps',      type=float, nargs='+', default=TEMP_CANDIDATES)

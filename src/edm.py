@@ -5,21 +5,21 @@ import math
 import itertools
 
 def get_it(y_train, y_train_pred,y_test_pred, num_classes):
-    cm = np.zeros((num_classes, num_classes))  
+    cm = np.zeros((num_classes, num_classes))
     for i in range(len(y_train)):
-        cm[y_train_pred[i]][y_train[i]] += 1   
+        cm[y_train_pred[i]][y_train[i]] += 1
 
     norm_cm = cm.T/((np.sum(cm,axis=1))+1e-8).T
     return norm_cm
 
 
 
-    
+
 def get_coeficient_matrix(y_train, y_train_pred, num_classes):
     cm = np.zeros((num_classes, num_classes))  # intiate coeficient matrix
     for i in range(len(y_train)):
         cm[y_train_pred[i]][y_train[i]] += 1   # increment the matrix (pred, actual)
-    
+
     # norm_cm = cm.T/((np.sum(cm,axis=1)).reshape(-1, 1)+1e-8).T                   # normalize confution matrix
     norm_cm = cm.T/((np.sum(cm,axis=1))+1e-8)
     return norm_cm.T
@@ -39,7 +39,7 @@ def get_init_solution(norm_cm, y_test_pred, num_classes):
     pred_count = np.zeros(num_classes)    # intiate predicted class distribution
     for i in range(len(y_test_pred)):
         pred_count[y_test_pred[i]] += 1   # populate predicted class distribution
-    
+
     pred_prevalence = pred_count/np.sum(pred_count)
 
     bs = basic_solution(norm_cm, pred_count)
@@ -98,7 +98,7 @@ def negative_adjustment(pred_count,init_count, num_classes):
 
     elif n_sum>2*(np.sum(pred_count)):
         init_count = pred_count
-    
+
     elif n_sum<2*(-np.sum(pred_count)):
         init_count = pred_count
 
@@ -112,7 +112,7 @@ def negative_adjustment(pred_count,init_count, num_classes):
                     last_index = i
                 else:
                     init_count[i] = 0
-            
+
         remaining = np.sum(pred_count) - np.sum(init_count)
 
         if (remaining>0 or init_count[last_index]>(-remaining)):
@@ -175,11 +175,11 @@ def get_test_distributions(y_test_pred, probs_test, num_classes,n_bins=100):
 
     for i in range(len(y_test_pred)):
         prob_dictionary[y_test_pred[i]].append(probs_test[i])
-    
+
     for p in range(num_classes):
         hist, bin_edges = np.histogram(np.array(prob_dictionary[p]), bins=n_bins, range=(0, 1), density=False)
         hist_dictionary[p] = hist / (hist.sum() + 1e-8)
-    
+
     return hist_dictionary, prob_dictionary
 
 def get_steps(num_classes, current_combination=[]):
@@ -189,7 +189,7 @@ def get_steps(num_classes, current_combination=[]):
         if sum(current_combination) == 0:
             yield tuple(current_combination)
         return
-    
+
     for element in arr:
         new_combination = current_combination + [element]
         yield from get_steps(num_classes-1, new_combination)
@@ -197,7 +197,7 @@ def get_steps(num_classes, current_combination=[]):
 def get_additional_neighbors(num_classes, step=2):
     directions = []
     index_pairs = list(itertools.combinations(range(num_classes), 2))
-    
+
     for i, j in index_pairs:
         for sign in [-1, 1]:
             vec = [0] * num_classes
@@ -247,10 +247,10 @@ def make_distributions(train_hist_dict, init_estimate, num_classes):
         est_hist = train_hist_dict[a]*init_estimate[a]
 
     return est_hist / (est_hist.sum() + 1e-6)
-    
+
 
 def get_estimation(train_hist_dictionary, test_hist_dictionary, num_classes, neighborhood_steps, initial_estimate, dm):
-    
+
     final_estimation = []
     total_distance = 0
     for p in range(num_classes):
@@ -269,15 +269,15 @@ def get_estimation(train_hist_dictionary, test_hist_dictionary, num_classes, nei
 
         while True:
             neighborhood = neighborhood_steps + best_estimation
-            
-            
+
+
             for current_neighbor in neighborhood:
                 # print('current neighbor: ',current_neighbor)
                 if not np.all(current_neighbor>= 0): continue
 
                 est_hist = make_distributions(train_hist_dictionary[p], current_neighbor, num_classes)
                 distance = get_distance(est_hist, pred_hist, dm)
-                
+
 
                 # delta = distance - min_distance
 
@@ -287,7 +287,7 @@ def get_estimation(train_hist_dictionary, test_hist_dictionary, num_classes, nei
                 #     min_distance = distance
                 #     best_estimation = current_neighbor
                 #     improvement_found = True
-                    
+
                 #     # Update global best if this is the best so far
                 #     if min_distance < global_min_distance:
                 #         global_best_estimation = current_neighbor.copy()
@@ -297,7 +297,7 @@ def get_estimation(train_hist_dictionary, test_hist_dictionary, num_classes, nei
                     # print('best current solution: ', current_neighbor, ' distance: ', distance)
                     min_distance = distance
                     best_estimation = current_neighbor
-        
+
             # T *= cooling_rate  # cool down
 
             # if not improvement_found:
@@ -305,7 +305,7 @@ def get_estimation(train_hist_dictionary, test_hist_dictionary, num_classes, nei
             if min_distance < init_distance:
                 init_distance = min_distance
             else: break
-        
+
         final_estimation.append(best_estimation)
         total_distance += min_distance
 
@@ -315,7 +315,7 @@ def get_actual_count(test_labels, num_classes):
     act = np.zeros(num_classes)
     for i in test_labels:
         act[i] += 1
-    
+
     return act
 
 def AE(act, est, num_classes):
@@ -333,13 +333,13 @@ def AE(act, est, num_classes):
 #         else:
 #             log_p = np.log(act[i]/est[i])
 #             kld += act[i]*log_p/np.sum(act)
-    
+
 #     return kld
 
 # def NKLD(act, est, num_classes):
 #     kld = KLD(act, est, num_classes)
 #     return 2*((np.exp(kld))/(1+ np.exp(kld))) - 1
-     
+
 
 
 def KLD(act, est, num_classes, eps=1e-9):
@@ -355,5 +355,3 @@ def NKLD(act, est, num_classes):
     kld = KLD(act, est, num_classes)
     nkld = 2 * (np.exp(kld) / (1 + np.exp(kld))) - 1
     return nkld
-            
-

@@ -1,11 +1,29 @@
-"""
-Ablation study for EDMN.
-Runs 5 variants in sequence for each experimental configuration:
+"""Ablation study for EDMN (binary datasets) -- discrete neighborhood search vs.
+differentiable JD + gradient descent, run side by side on the identical trained model.
+
+Copied from run_ablation_binary.py (same 6-variant scaffold, same data splits, same
+warm-start behavior) so nothing in run_ablation_binary.py, edm_binary.py,
+distance_metrics.py or enn_binary.py needs to change. The only difference from
+run_ablation_binary.py: for every (config, variant), after training the model once, the
+EDM estimation step is run TWICE on the exact same histograms/candidate initial
+solutions --
+
+  1. edm_binary.get_estimation                  -- the existing discrete neighborhood
+                                                     search (loops over ~12 candidate
+                                                     initial estimates internally)
+  2. edm_binary_diffjd.get_estimation_diffjd     -- Adam gradient descent on a
+                                                     differentiable Jensen Divergence,
+                                                     over the SAME candidate list
+
+-- with wall-clock timing on both, so the only variable is the search algorithm.
+
+Runs 6 variants in sequence for each experimental configuration:
   1. Baseline NN + EDM          (plain CE, T=1, no EDM loss)
   2. NN + Label Smoothing + EDM (CE with LS=0.025, T=1, no EDM loss)
   3. NN + Temperature Scaling + EDM (plain CE, T=temp during training, no EDM loss)
   4. NN + LDM Loss + EDM        (CE + EDM loss, T=1, no LS)
-  5. Full EDMN                   (CE+LS + EDM loss + T=temp)
+  5. NN + Label Smoothing + Temperature Scaling + EDM (the ep+tau control, no EDM loss)
+  6. Full EDMN                   (CE+LS + EDM loss + T=temp)
 """
 
 import torch
@@ -14,15 +32,18 @@ import torch.optim as optim
 
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
-import edm
-import enn
+import edm_binary
+import edm_binary_diffjd
+import enn_binary
 import csv
 import argparse
 import data_loader
-import multiclass_models
+import models
 import math
 import os
 import copy
+import time
+import itertools
 from tqdm import tqdm
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -30,16 +51,27 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # ---------------------------------------------------------------------------
 # Arguments
 # ---------------------------------------------------------------------------
-parser = argparse.ArgumentParser(description="Ablation study for EDMN")
+parser = argparse.ArgumentParser(description="Ablation study for EDMN (binary) -- discrete vs diffjd search")
 parser.add_argument('--dataset',          type=str,   required=True)
-parser.add_argument('--distance_metric',  type=str,   default='JD')
+parser.add_argument('--distance_metric',  type=str,   default='JD',
+                    help='edm_binary_diffjd only implements a differentiable JD; must be JD')
 parser.add_argument('--epochs',           type=int,   default=50)
 parser.add_argument('--batch_size',       type=int,   default=32)
 parser.add_argument('--bins',             type=int,   default=30)
 parser.add_argument('--learning_rate',    type=float, default=0.001)
 parser.add_argument('--temperature',      type=float, default=2.0,
-                    help='Temperature used in variants 3 & 5 during training')
+                    help='Temperature used in variants 3, 5 & 6 during training')
+parser.add_argument('--search_steps',     type=int,   default=200,
+                    help='Adam steps for the differentiable JD gradient-descent search')
+parser.add_argument('--search_lr',        type=float, default=0.05,
+                    help='Adam learning rate for the differentiable JD search')
+parser.add_argument('--max_configs',      type=int,   default=None,
+                    help='cap on number of (dt,train,test,seed,bins) configs -- for smoke testing')
 args = parser.parse_args()
+
+if args.distance_metric != 'JD':
+    raise ValueError("edm_binary_diffjd only implements a differentiable JD; "
+                      "pass --distance_metric JD (or extend distance_metrics_diff.py first)")
 
 epochs      = args.epochs
 batch_size  = args.batch_size
@@ -47,10 +79,8 @@ lr          = args.learning_rate
 bins        = args.bins
 dm          = args.distance_metric
 temperature = args.temperature
-
-# print(f"Device: {device}")
-# print(f"Dataset: {args.dataset} | DM: {dm} | Epochs: {epochs} | "
-#       f"LR: {lr} | Bins: {bins} | Temperature: {temperature}")
+search_steps = args.search_steps
+search_lr    = args.search_lr
 
 # ---------------------------------------------------------------------------
 # Model components
@@ -80,7 +110,7 @@ class FullModel(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Data split utilities  (identical to run_enn.py)
+# Data split utilities  (identical to run_ablation_binary.py)
 # ---------------------------------------------------------------------------
 def get_draw_size(y_cts, dt, train_distr, test_distr, C=None):
     if C is None:
@@ -120,7 +150,21 @@ def synthetic_draw(n_y, n_classes, y_cts, y_idx, dt_distr, train_distr, test_dis
 
     train_index = np.concatenate(train_list)
     test_index  = np.concatenate(test_list).astype(int)
-    return train_index, test_index
+
+    n_train = train_index.shape[0]
+    n_test  = test_index.shape[0]
+    M       = n_train + n_test
+    r_train = n_train * 1.0 / M
+    r_test  = n_test  * 1.0 / M
+
+    train_ratios = train_cts * 1.0 / n_train
+    test_ratios  = test_cts  * 1.0 / n_test
+
+    stats_vec = np.concatenate(
+        [np.array([M, n_train, n_test, r_train, r_test]),
+         train_cts, train_ratios, test_cts, test_ratios])
+
+    return train_index, test_index, stats_vec
 
 
 # ---------------------------------------------------------------------------
@@ -145,12 +189,8 @@ def collect_predictions(model, loader, device, infer_temperature=1.0):
 
 def train_variant(train_loader, test_loader, input_dim, num_classes, variant,
                   init_base_weights=None):
-    """Train one ablation variant and return the best model.
-
-    init_base_weights: optional state_dict to warm-start the base classifier
-                       (used for Full EDMN, loaded from the Label Smooth variant).
-    """
-    base_model   = multiclass_models.getModel(args.dataset, input_dim, num_classes)
+    """Train one ablation variant and return the best model."""
+    base_model   = models.getModel(args.dataset, input_dim, num_classes)
     use_edm_loss = variant['use_edm_loss']
 
     if init_base_weights is not None:
@@ -180,8 +220,8 @@ def train_variant(train_loader, test_loader, input_dim, num_classes, variant,
             ce_loss   = criterion(logits, labels)
 
             if use_edm_loss:
-                edm_val    = enn.train_edm(train_loader, test_loader, model, device,
-                                           num_classes, bins, dm)
+                edm_val    = enn_binary.train_edm(train_loader, test_loader, model, device,
+                                                  num_classes, bins, dm)
                 edm_tensor = torch.tensor(edm_val, device=device,
                                           dtype=ce_loss.dtype, requires_grad=True)
                 loss = model.loss_weights(ce_loss, edm_tensor)
@@ -200,43 +240,62 @@ def train_variant(train_loader, test_loader, input_dim, num_classes, variant,
     return best_model
 
 
-def run_edm_estimation(model, train_loader, test_loader, num_classes, neighborhood_steps):
-    """Run the full EDM estimation pipeline. Returns (mae, nkld, acc, act, prd, est)."""
-    # Inference always at T=1.0 (consistent with original run_enn.py)
+def run_edm_estimation_compare(model, train_loader, test_loader, num_classes, neighborhood_steps):
+    """Run the EDM estimation step twice on the identical trained model: once with
+    the existing discrete neighborhood search (edm_binary.get_estimation, unchanged),
+    once with the differentiable JD + gradient descent search (edm_binary_diffjd), both
+    over the exact same list of candidate initial estimates edm_binary.get_init_solution
+    produces.
+
+    Returns a dict: {'acc', 'act', 'prd', 'disc': {...}, 'diffjd': {...}}
+    """
     y_train, y_train_pred, probs_train = collect_predictions(model, train_loader, device, 1.0)
     y_test,  y_test_pred,  probs_test  = collect_predictions(model, test_loader,  device, 1.0)
 
-    acc     = edm.getAccuracy(y_test, y_test_pred)
-    norm_cm = edm.get_coeficient_matrix(y_train, y_train_pred, num_classes)
-    initial_solution, init_estimate_pred = edm.get_init_solution(
-        norm_cm, y_test_pred, num_classes)
+    acc     = edm_binary.getAccuracy(y_test, y_test_pred)
+    norm_cm = edm_binary.get_coeficient_matrix(y_train, y_train_pred, num_classes)
 
-    train_hist_dict, _ = edm.get_train_distributions(
+    # Returns a list of initial estimates (binary-specific)
+    ini_estimates = edm_binary.get_init_solution(norm_cm, y_test_pred, num_classes)
+
+    train_hist_dict, _ = edm_binary.get_train_distributions(
         y_train, y_train_pred, probs_train, num_classes, bins)
-    test_hist_dict, _  = edm.get_test_distributions(
+    test_hist_dict, _  = edm_binary.get_test_distributions(
         y_test_pred, probs_test, num_classes, bins)
 
-    d = np.inf
-    final_estimation = None
-    for ini_sol in [initial_solution, init_estimate_pred]:
-        fe, distance = edm.get_estimation(
-            train_hist_dict, test_hist_dict, num_classes,
-            neighborhood_steps, ini_sol, dm)
-        if distance < d:
-            d                = distance
-            final_estimation = fe
+    act = edm_binary.get_actual_count(y_test, num_classes)
+    prd = edm_binary.get_actual_count(y_test_pred, num_classes)
 
-    act = edm.get_actual_count(y_test, num_classes)
-    prd = edm.get_actual_count(y_test_pred, num_classes)
-    est = np.sum(final_estimation, axis=0)
+    # -- discrete neighborhood search (existing edm_binary.get_estimation, unchanged) --
+    t0 = time.perf_counter()
+    fe_disc, _ = edm_binary.get_estimation(
+        train_hist_dict, test_hist_dict, num_classes,
+        neighborhood_steps, ini_estimates, dm)
+    time_disc = time.perf_counter() - t0
 
-    mae  = edm.AE(act, est, num_classes)
-    nkld = edm.NKLD(act, est, num_classes)
-    return mae, nkld, acc, act, prd, est
+    # -- differentiable JD + Adam gradient descent search --
+    t0 = time.perf_counter()
+    fe_diffjd, _ = edm_binary_diffjd.get_estimation_diffjd(
+        train_hist_dict, test_hist_dict, num_classes, ini_estimates,
+        steps=search_steps, lr=search_lr)
+    time_diffjd = time.perf_counter() - t0
+
+    est_disc   = np.sum(fe_disc, axis=0)
+    est_diffjd = np.sum(fe_diffjd, axis=0)
+
+    return {
+        'acc': acc, 'act': act, 'prd': prd,
+        'disc':   {'mae': edm_binary.AE(act, est_disc, num_classes),
+                   'nkld': edm_binary.NKLD(act, est_disc, num_classes),
+                   'time': time_disc, 'est': est_disc},
+        'diffjd': {'mae': edm_binary.AE(act, est_diffjd, num_classes),
+                   'nkld': edm_binary.NKLD(act, est_diffjd, num_classes),
+                   'time': time_diffjd, 'est': est_diffjd},
+    }
 
 
 # ---------------------------------------------------------------------------
-# Ablation variant definitions
+# Ablation variant definitions  (identical to run_ablation_binary.py)
 # ---------------------------------------------------------------------------
 ABLATION_VARIANTS = [
     {
@@ -257,7 +316,7 @@ ABLATION_VARIANTS = [
         'name':             'NN + Temperature Scaling + EDM',
         'short':            'temp_scale',
         'label_smoothing':  0.0,
-        'train_temperature': temperature,   # T applied during training
+        'train_temperature': temperature,
         'use_edm_loss':     False,
     },
     {
@@ -284,7 +343,7 @@ ABLATION_VARIANTS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Prevalence tables  (identical to run_enn.py)
+# Prevalence tables (binary datasets, identical to run_ablation_binary.py)
 # ---------------------------------------------------------------------------
 train_2_prevalences  = [[0.1, 0.9], [0.3, 0.7], [0.5, 0.5], [0.7, 0.3], [0.9, 0.1]]
 train_3_prevalences  = [[0.2, 0.5, 0.3], [0.05, 0.8, 0.15], [0.35, 0.3, 0.35]]
@@ -324,41 +383,36 @@ train_test_ratios = [np.array(d) for d in [[0.9, 0.1], [0.3, 0.7], [0.5, 0.5], [
 # ---------------------------------------------------------------------------
 # Pretty-print helpers
 # ---------------------------------------------------------------------------
-SEP  = "=" * 100
-HSEP = "-" * 100
-
-def print_config_results(config_id, dt_distr, train_distr, test_distr, seed, bins_val, results):
-    print(f"\n  Config #{config_id}  |  dt={np.round(dt_distr,2)}  "
-          f"train={np.round(train_distr,2)}  test={np.round(test_distr,2)}  "
-          f"seed={seed}  bins={bins_val}")
-    print(f"  {'Variant':<35} {'NKLD':>8} {'Acc%':>7}")
-    print(f"  {'-'*35} {'-'*8} {'-'*7}")
-    for v in ABLATION_VARIANTS:
-        s = v['short']
-        if s in results and results[s] is not None:
-            r = results[s]
-            print(f"  {v['name']:<35} {r['nkld']:>8.4f} {r['acc']:>6.1f}%")
-        else:
-            print(f"  {v['name']:<35} {'ERROR':>8} {'ERROR':>7}")
+SEP  = "=" * 120
+HSEP = "-" * 120
 
 
 def print_summary(all_results):
     print(f"\n{SEP}")
-    print(f"  ABLATION STUDY SUMMARY  |  Dataset: {args.dataset}  |  DM: {dm}")
+    print(f"  ABLATION SUMMARY (binary) -- discrete search vs differentiable JD + gradient descent")
+    print(f"  Dataset: {args.dataset}  |  DM: {dm}  |  search_steps={search_steps}  search_lr={search_lr}")
     print(SEP)
-    print(f"  {'Variant':<35} {'Mean MAE':>10} {'Mean NKLD':>10} {'Mean Acc%':>10} {'N':>5}")
-    print(f"  {'-'*35} {'-'*10} {'-'*10} {'-'*10} {'-'*5}")
+    print(f"  {'Variant':<32} {'Acc%':>6} | {'MAE_disc':>9} {'NKLD_disc':>9} {'t_disc(s)':>10} "
+          f"| {'MAE_gd':>9} {'NKLD_gd':>9} {'t_gd(s)':>9} {'N':>4}")
+    print(f"  {'-'*32} {'-'*6} | {'-'*9} {'-'*9} {'-'*10} | {'-'*9} {'-'*9} {'-'*9} {'-'*4}")
     for v in ABLATION_VARIANTS:
-        s     = v['short']
-        maes  = [r[s]['mae']  for r in all_results if s in r and r[s] is not None and r[s]['acc'] >= 55]
-        nklds = [r[s]['nkld'] for r in all_results if s in r and r[s] is not None and r[s]['acc'] >= 55]
-        accs  = [r[s]['acc']  for r in all_results if s in r and r[s] is not None and r[s]['acc'] >= 55]
-        n     = len(maes)
+        s = v['short']
+        rows = [r[s] for r in all_results if s in r and r[s] is not None and r[s]['acc'] >= 55]
+        n = len(rows)
         if n > 0:
-            print(f"  {v['name']:<35} {np.mean(maes):>10.4f} {np.mean(nklds):>10.4f} "
-                  f"{np.mean(accs):>9.1f}% {n:>5}")
+            accs   = [r['acc'] for r in rows]
+            mae_d  = [r['disc']['mae'] for r in rows]
+            nkld_d = [r['disc']['nkld'] for r in rows]
+            t_d    = [r['disc']['time'] for r in rows]
+            mae_g  = [r['diffjd']['mae'] for r in rows]
+            nkld_g = [r['diffjd']['nkld'] for r in rows]
+            t_g    = [r['diffjd']['time'] for r in rows]
+            print(f"  {v['name']:<32.32} {np.mean(accs):>5.1f}% | {np.mean(mae_d):>9.4f} "
+                  f"{np.mean(nkld_d):>9.4f} {np.mean(t_d):>10.4f} | {np.mean(mae_g):>9.4f} "
+                  f"{np.mean(nkld_g):>9.4f} {np.mean(t_g):>9.4f} {n:>4}")
         else:
-            print(f"  {v['name']:<35} {'N/A':>10} {'N/A':>10} {'N/A':>10} {0:>5}")
+            print(f"  {v['name']:<32.32} {'N/A':>6} | {'N/A':>9} {'N/A':>9} {'N/A':>10} "
+                  f"| {'N/A':>9} {'N/A':>9} {'N/A':>9} {0:>4}")
     print(SEP)
 
 
@@ -366,18 +420,13 @@ def print_summary(all_results):
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    # Load data
-    # print("\nLoading data ...")
     X_n, y_n = data_loader.load_data(args.dataset)
-    # print(f"  X shape: {X_n.shape}  |  y shape: {y_n.shape}")
 
     Y           = np.unique(y_n)
     num_classes = len(Y)
     y_idx       = [np.where(y_n == l)[0] for l in Y]
     y_cts       = np.array([len(np.where(y_n == l)[0]) for l in Y])
     N           = len(X_n)
-    # print(f"  Classes: {num_classes}  |  Total samples: {N}")
-    # print(f"  Class counts: {dict(zip(Y, y_cts))}")
 
     if num_classes not in train_prev_dictionary:
         raise ValueError(f"No prevalence table for {num_classes} classes")
@@ -385,23 +434,24 @@ def main():
     train_ds = np.array(train_prev_dictionary[num_classes])
     test_ds  = np.array(test_prev_dictionary[num_classes])
 
-    # Pre-compute EDM neighbourhood steps
-    neighborhood_steps = np.array(list(edm.get_steps(num_classes)))
-    for i in range(num_classes):
-        additional = edm.get_additional_neighbors(num_classes, step=(i + 2))
+    # Pre-compute EDM neighbourhood steps (only needed for the discrete search)
+    neighborhood_steps = np.array(list(edm_binary.get_steps(num_classes)))
+    for i in range(2):
+        additional = edm_binary.get_additional_neighbors(num_classes, step=(i + 2) * 2)
         neighborhood_steps = np.vstack([neighborhood_steps, additional])
-    # print(f"  Neighbourhood steps: {len(neighborhood_steps)}")
 
-    # Output CSV
-    out_dir = '../results_ablation'
+    # Output CSV -- own directory, never touches ../results_ablation_binary/
+    out_dir = '../results_ablation_binary_diffjd'
     os.makedirs(out_dir, exist_ok=True)
-    csv_path = f'{out_dir}/ablation_{args.dataset}_{dm}.csv'
+    csv_path = f'{out_dir}/ablation_binary_{args.dataset}_{dm}_diffjd.csv'
 
     csv_headers = ['config_id', 'dt_distr', 'train_distr', 'test_distr', 'seed', 'bins']
     for v in ABLATION_VARIANTS:
         s = v['short']
-        csv_headers += [f'mae_{s}', f'nkld_{s}', f'acc_{s}']
-    csv_headers += ['act', 'prd']   # from the last variant (Full EDMN)
+        csv_headers += [f'acc_{s}',
+                        f'mae_{s}_disc', f'nkld_{s}_disc', f'time_{s}_disc',
+                        f'mae_{s}_diffjd', f'nkld_{s}_diffjd', f'time_{s}_diffjd']
+    csv_headers += ['act', 'prd']   # from the last variant (Full EDMN), discrete-search est
 
     with open(csv_path, 'w', newline='') as f:
         csv.writer(f).writerow(csv_headers)
@@ -409,114 +459,96 @@ def main():
     seed_list = [11]
     bin_list  = [30]
 
-    all_results = []   # list of per-config result dicts
+    all_results = []
     config_id   = 0
 
-    # print(f"\nStarting ablation study ... results -> {csv_path}\n{SEP}")
+    configs = itertools.product(train_test_ratios, train_ds, test_ds, seed_list, bin_list)
 
-    for dt_distr in train_test_ratios:
-        for train_distr in train_ds:
-            for test_distr in test_ds:
-                for seed in seed_list:
-                    for bins_val in bin_list:
-                        config_id += 1
-                        config_results  = {}   # short_name -> {mae, nkld, acc, ...}
-                        saved_base_weights = {}  # short_name -> base state_dict for warm-start
+    for dt_distr, train_distr, test_distr, seed, bins_val in configs:
+        config_id += 1
+        if args.max_configs is not None and config_id > args.max_configs:
+            break
 
-                        try:
-                            train_index, test_index = synthetic_draw(
-                                N, num_classes, y_cts, y_idx,
-                                dt_distr, train_distr, test_distr, seed)
+        config_results     = {}
+        saved_base_weights = {}
 
-                            X_train, y_train = X_n[train_index], y_n[train_index]
-                            X_test,  y_test  = X_n[test_index],  y_n[test_index]
-                            input_dim        = X_train.shape[1]
-                            # print(f"\nConfig #{config_id}  train={X_train.shape}  test={X_test.shape}")
+        try:
+            train_index, test_index, _ = synthetic_draw(
+                N, num_classes, y_cts, y_idx,
+                dt_distr, train_distr, test_distr, seed)
 
-                            X_train_t = torch.tensor(X_train, dtype=torch.float32)
-                            y_train_t = torch.tensor(y_train, dtype=torch.long)
-                            X_test_t  = torch.tensor(X_test,  dtype=torch.float32)
-                            y_test_t  = torch.tensor(y_test,  dtype=torch.long)
+            X_train, y_train = X_n[train_index], y_n[train_index]
+            X_test,  y_test  = X_n[test_index],  y_n[test_index]
+            input_dim        = X_train.shape[1]
 
-                            train_loader = DataLoader(
-                                TensorDataset(X_train_t, y_train_t),
-                                batch_size=batch_size, shuffle=True)
-                            test_loader  = DataLoader(
-                                TensorDataset(X_test_t, y_test_t),
-                                batch_size=batch_size)
+            X_train_t = torch.tensor(X_train, dtype=torch.float32)
+            y_train_t = torch.tensor(y_train, dtype=torch.long)
+            X_test_t  = torch.tensor(X_test,  dtype=torch.float32)
+            y_test_t  = torch.tensor(y_test,  dtype=torch.long)
 
-                            # ---- Run each ablation variant ----
-                            for variant in ABLATION_VARIANTS:
-                                vname = variant['name']
-                                short = variant['short']
-                                # print(f"  --> {vname}")
-                                try:
-                                    # Full EDMN warm-starts from the Label Smooth model so
-                                    # it begins from a good classifier and lets the EDM loss
-                                    # refine it — giving it the best structural advantage.
-                                    init_weights = (saved_base_weights.get('label_smooth')
-                                                    if short == 'full_edmn' else None)
+            train_loader = DataLoader(
+                TensorDataset(X_train_t, y_train_t),
+                batch_size=batch_size, shuffle=True)
+            test_loader  = DataLoader(
+                TensorDataset(X_test_t, y_test_t),
+                batch_size=batch_size)
 
-                                    model = train_variant(
-                                        train_loader, test_loader,
-                                        input_dim, num_classes, variant,
-                                        init_base_weights=init_weights)
+            # ---- Run each ablation variant ----
+            for variant in ABLATION_VARIANTS:
+                vname = variant['name']
+                short = variant['short']
+                try:
+                    init_weights = (saved_base_weights.get('label_smooth')
+                                    if short == 'full_edmn' else None)
 
-                                    # Save base weights for potential warm-start use
-                                    base = model.mlp if isinstance(model, FullModel) else model
-                                    saved_base_weights[short] = copy.deepcopy(base.state_dict())
+                    model = train_variant(
+                        train_loader, test_loader,
+                        input_dim, num_classes, variant,
+                        init_base_weights=init_weights)
 
-                                    mae, nkld, acc, act, prd, est = run_edm_estimation(
-                                        model, train_loader, test_loader,
-                                        num_classes, neighborhood_steps)
+                    base = model.mlp if isinstance(model, FullModel) else model
+                    saved_base_weights[short] = copy.deepcopy(base.state_dict())
 
-                                    config_results[short] = {
-                                        'mae':  mae,
-                                        'nkld': nkld,
-                                        'acc':  acc,
-                                        'act':  act,
-                                        'prd':  prd,
-                                        'est':  est,
-                                    }
-                                    # print(f"     NKLD={nkld:.4f}  Acc={acc:.1f}%")
+                    result = run_edm_estimation_compare(
+                        model, train_loader, test_loader,
+                        num_classes, neighborhood_steps)
 
-                                except Exception as e:
-                                    # print(f"     [ERROR] {vname}: {e}")
-                                    config_results[short] = None
+                    config_results[short] = result
 
-                            # Print per-config table
-                            # print_config_results(config_id, dt_distr, train_distr,
-                            #                      test_distr, seed, bins_val, config_results)
-                            all_results.append(config_results)
+                except Exception as e:
+                    print(f"     [ERROR] {vname}: {e}")
+                    config_results[short] = None
 
-                            # Write CSV row
-                            row = [config_id,
-                                   list(np.round(dt_distr, 3)),
-                                   list(np.round(train_distr, 3)),
-                                   list(np.round(test_distr, 3)),
-                                   seed, bins_val]
-                            for v in ABLATION_VARIANTS:
-                                s = v['short']
-                                r = config_results.get(s)
-                                if r:
-                                    row += [r['mae'], r['nkld'], r['acc']]
-                                else:
-                                    row += [None, None, None]
-                            # append act/prd from Full EDMN if available
-                            fe = config_results.get('full_edmn')
-                            row += [list(fe['act']) if fe else None,
-                                    list(fe['prd']) if fe else None]
+            all_results.append(config_results)
 
-                            with open(csv_path, 'a', newline='') as f:
-                                csv.writer(f).writerow(row)
+            row = [config_id,
+                   list(np.round(dt_distr, 3)),
+                   list(np.round(train_distr, 3)),
+                   list(np.round(test_distr, 3)),
+                   seed, bins_val]
+            for v in ABLATION_VARIANTS:
+                s = v['short']
+                r = config_results.get(s)
+                if r:
+                    row += [r['acc'],
+                            r['disc']['mae'], r['disc']['nkld'], r['disc']['time'],
+                            r['diffjd']['mae'], r['diffjd']['nkld'], r['diffjd']['time']]
+                else:
+                    row += [None, None, None, None, None, None, None]
 
-                        except Exception as e:
-                            # print(f"[Config #{config_id} SKIPPED] {e}")
-                            continue
+            fe = config_results.get('full_edmn')
+            row += [list(fe['act']) if fe else None,
+                    list(fe['prd']) if fe else None]
 
-    # Final summary
+            with open(csv_path, 'a', newline='') as f:
+                csv.writer(f).writerow(row)
+
+        except Exception as e:
+            print(f"[Config #{config_id} SKIPPED] {e}")
+            continue
+
     print_summary(all_results)
-    # print(f"\nCSV saved to: {csv_path}")
+    print(f"\nCSV saved to: {csv_path}")
 
 
 if __name__ == '__main__':

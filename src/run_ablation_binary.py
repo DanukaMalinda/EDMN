@@ -32,7 +32,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # ---------------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Ablation study for EDMN (binary datasets)")
 parser.add_argument('--dataset',          type=str,   required=True)
-parser.add_argument('--distance_metric',  type=str,   default='HD')
+parser.add_argument('--distance_metric',  type=str,   default='JD')
 parser.add_argument('--epochs',           type=int,   default=50)
 parser.add_argument('--batch_size',       type=int,   default=32)
 parser.add_argument('--bins',             type=int,   default=30)
@@ -266,6 +266,13 @@ ABLATION_VARIANTS = [
         'label_smoothing':  0.0,
         'train_temperature': 1.0,
         'use_edm_loss':     True,
+    },
+    {
+        'name':             'NN + Label Smoothing + Temperature Scaling + EDM',
+        'short':            'nn_ls_ts_edm',
+        'label_smoothing':  0.025,
+        'train_temperature': temperature,
+        'use_edm_loss':     False,
     },
     {
         'name':             'Full EDMN',
